@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HerbiBioS — управление</title>
+  <style>
+    :root { color-scheme: dark; font-family: Segoe UI, Arial, sans-serif; background: #10151c; color: #e9f0f7; }
+    body { margin: 0; padding: 24px; }
+    main { max-width: 1050px; margin: auto; }
+    h1 { margin: 0 0 6px; }
+    .muted { color: #9badbd; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 18px; }
+    section { background: #1a2430; border: 1px solid #304153; border-radius: 12px; padding: 18px; }
+    button, select, input { font: inherit; }
+    button { border: 0; border-radius: 8px; padding: 10px 14px; color: white; background: #2767a7; cursor: pointer; }
+    button:hover { background: #3484d4; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .mode button { margin: 8px 8px 0 0; }
+    .active { outline: 2px solid #69d6a0; }
+    .warning { color: #ffca74; }
+    .error { color: #ff8585; }
+    .ok { color: #83e5ae; }
+    .servo { border-top: 1px solid #304153; margin-top: 14px; padding-top: 12px; }
+    .servo:first-of-type { border-top: 0; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+    input[type=range] { flex: 1; min-width: 160px; }
+    input[type=number] { width: 66px; background: #0f1720; border: 1px solid #45586d; color: white; padding: 7px; border-radius: 6px; }
+    .small { font-size: .9rem; }
+    #preview { width: 100%; min-height: 160px; object-fit: contain; background: #080b10; border-radius: 8px; }
+    code { color: #a8d4ff; }
+    @media (max-width: 600px) { body { padding: 12px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>HerbiBioS</h1>
+  <div class="muted">Локальная панель управления сортировщиком</div>
+  <div class="grid">
+    <section class="mode">
+      <h2>Режим работы</h2>
+      <div>
+        <button id="manualMode">Ручной режим</button>
+        <button id="autoMode">Авто через ИИ</button>
+      </div>
+      <p id="modeState">Загружаю состояние…</p>
+      <p id="hardwareState" class="warning"></p>
+      <p class="small muted">В ручном режиме ИИ не запускает сервоприводы. В авто режиме ноутбук получает фото с ESP32-CAM, распознаёт мусор и отправляет BIN-команду только при уверенном известном классе.</p>
+      <button id="cameraCheck">Проверить фото с ESP32-CAM</button>
+      <p id="cameraState" class="small muted"></p>
+      <img id="preview" alt="Превью камеры появится после проверки или запуска авто режима">
+    </section>
+    <section>
+      <h2>Ручная настройка сервоприводов</h2>
+      <p class="small muted">Выбери угол и нажми «Проверить угол». Для каждого отсека отдельно сохрани закрытое и открытое положение. Диапазон — 0–180°. Серво должно быть без механического упора.</p>
+      <button id="readAngles">Прочитать сохранённые углы из ESP32</button>
+      <div id="servos"></div>
+    </section>
+  </div>
+  <section style="margin-top:16px">
+    <h2>Состояние</h2>
+    <div id="decision" class="muted">Ожидание.</div>
+    <div id="lastCommand" class="muted"></div>
+    <div id="message" role="status"></div>
+  </section>
+</main>
+<script>
+  const bins = ["BIN_1", "BIN_2", "BIN_3"];
+  let state = { mode: "manual", hardware_enabled: false, servo_angles: {} };
+  const $ = (id) => document.getElementById(id);
+  const safeAngle = (value) => Math.max(0, Math.min(180, Number(value) || 0));
+
+  function showMessage(text, kind = "muted") {
+    $("message").className = kind;
+    $("message").textContent = text;
+  }
+
+  async function api(path, data) {
+    const response = await fetch(path, {
+      method: data ? "POST" : "GET",
+      headers: data ? { "Content-Type": "application/json" } : {},
+      body: data ? JSON.stringify(data) : undefined,
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || result.message || response.statusText);
+    return result;
+  }
+
+  function buildServoCards() {
+    $("servos").replaceChildren();
+    bins.forEach((bin) => {
+      const angles = state.servo_angles?.[bin] || { closed: 0, open: 90 };
+      const card = document.createElement("div");
+      card.className = "servo";
+      card.innerHTML = `
+        <h3>${bin} · GPIO ${bin === "BIN_1" ? "12" : bin === "BIN_2" ? "13" : "14"}</h3>
+        <div class="row">
+          <input class="angle-range" type="range" min="0" max="180" value="${angles.open}" aria-label="${bin} угол проверки">
+          <input class="angle-number" type="number" min="0" max="180" value="${angles.open}" aria-label="${bin} угол">
+          <button class="move">Проверить угол</button>
+        </div>
+        <div class="row small">
+          Закрыто <input class="closed-angle" type="number" min="0" max="180" value="${angles.closed}">
+          Открыто <input class="open-angle" type="number" min="0" max="180" value="${angles.open}">
+          <button class="save">Сохранить положения</button>
+        </div>`;
+      const range = card.querySelector(".angle-range");
+      const number = card.querySelector(".angle-number");
+      range.addEventListener("input", () => { number.value = range.value; });
+      number.addEventListener("input", () => { range.value = safeAngle(number.value); });
+      card.querySelector(".move").addEventListener("click", async () => {
+        try {
+          showMessage(`Отправляю ${bin}, ${safeAngle(number.value)}°…`);
+          const result = await api("/api/servo/move", { bin, angle: safeAngle(number.value) });
+          showMessage(
+            result.physical
+              ? `Серво ${bin} перемещён на ${safeAngle(number.value)}°.`
+              : `Симуляция: команда ${bin}, ${safeAngle(number.value)}° не отправлена в ESP32.`,
+            result.physical ? "ok" : "warning"
+          );
+        } catch (error) { showMessage(error.message, "error"); }
+      });
+      card.querySelector(".save").addEventListener("click", async () => {
+        try {
+          const closed = safeAngle(card.querySelector(".closed-angle").value);
+          const open = safeAngle(card.querySelector(".open-angle").value);
+          showMessage(`Сохраняю положения ${bin} в ESP32…`);
+          const closedResult = await api("/api/servo/position", { bin, position: "closed", angle: closed });
+          const openResult = await api("/api/servo/position", { bin, position: "open", angle: open });
+          if (closedResult.persisted && openResult.persisted) {
+            state.servo_angles[bin] = { closed, open };
+            showMessage(`Сохранено в память ESP32: ${bin}, закрыто ${closed}°, открыто ${open}°.`, "ok");
+          } else {
+            showMessage("Симуляция: углы не переданы и не сохранены в ESP32. Для этого включи физическое управление в config.yaml.", "warning");
+          }
+        } catch (error) { showMessage(error.message, "error"); }
+      });
+      $("servos").appendChild(card);
+    });
+  }
+
+  function renderState(next) {
+    state = { ...state, ...next };
+    $("modeState").textContent = `Активен режим: ${state.mode === "automatic" ? "АВТО через ИИ" : "РУЧНОЙ"}`;
+    $("manualMode").classList.toggle("active", state.mode === "manual");
+    $("autoMode").classList.toggle("active", state.mode === "automatic");
+    $("hardwareState").textContent = state.hardware_enabled
+      ? "Физическое управление разрешено конфигурацией."
+      : "Симуляция: физическое управление выключено. Для серво включи actuation_enabled=true, serial.enabled=true и dry_run=false в config.yaml.";
+    $("decision").textContent = state.last_detection
+      ? `${state.last_detection.class_name} · ${(state.last_detection.confidence * 100).toFixed(1)}% → ${state.last_detection.bin} (${state.last_detection.reason})`
+      : "Пока нет распознанных объектов.";
+    $("lastCommand").textContent = state.last_command ? `Последняя команда: ${state.last_command}` : "";
+    if (state.last_error) showMessage(state.last_error, "error");
+    if (state.frame_ready && state.mode === "automatic") {
+      $("preview").src = `/api/frame.jpg?t=${Date.now()}`;
+    }
+  }
+
+  $("manualMode").addEventListener("click", async () => {
+    try { renderState(await api("/api/mode", { mode: "manual" })); showMessage("Ручной режим активен."); }
+    catch (error) { showMessage(error.message, "error"); }
+  });
+  $("autoMode").addEventListener("click", async () => {
+    try { renderState(await api("/api/mode", { mode: "automatic" })); showMessage("Автоматический режим запущен."); }
+    catch (error) { showMessage(error.message, "error"); }
+  });
+  $("cameraCheck").addEventListener("click", async () => {
+    try {
+      const result = await api("/api/camera-check");
+      $("preview").src = `/api/frame.jpg?t=${Date.now()}`;
+      $("cameraState").textContent = `Камера отвечает: ${result.width}×${result.height}`;
+      showMessage("Снимок получен. Сервоприводы не задействованы.", "ok");
+    } catch (error) {
+      $("cameraState").textContent = "";
+      showMessage(error.message, "error");
+    }
+  });
+  $("readAngles").addEventListener("click", async () => {
+    try {
+      const result = await api("/api/servo-angles");
+      state.servo_angles = result.angles;
+      buildServoCards();
+      showMessage(
+        result.from_device ? "Углы прочитаны из ESP32." : "Сейчас показаны стартовые значения UI, а не настройки из ESP32; физическое управление отключено.",
+        result.from_device ? "ok" : "warning"
+      );
+    } catch (error) { showMessage(error.message, "error"); }
+  });
+  async function refresh() {
+    try {
+      const firstRender = Object.keys(state.servo_angles || {}).length === 0;
+      renderState(await api("/api/state"));
+      if (firstRender) buildServoCards();
+    }
+    catch (error) { showMessage(error.message, "error"); }
+  }
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

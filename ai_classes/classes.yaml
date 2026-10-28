@@ -1,0 +1,39 @@
+model_classes:
+  - id: 0
+    name: battery
+    bin: UNKNOWN
+  - id: 1
+    name: can
+    bin: BIN_2
+  - id: 2
+    name: cardboard
+    bin: BIN_3
+  - id: 3
+    name: drink carton
+    bin: BIN_1
+  - id: 4
+    name: glass bottle
+    bin: UNKNOWN
+  - id: 5
+    name: paper
+    bin: BIN_3
+  - id: 6
+    name: plastic bag
+    bin: BIN_1
+  - id: 7
+    name: plastic bottle
+    bin: BIN_1
+  - id: 8
+    name: plastic bottle cap
+    bin: BIN_1
+  - id: 9
+    name: pop tab
+    bin: BIN_2
+
+face_detector:
+  name: face
+  purpose: suppression_only
+  bin: null
+
+confidence_threshold: 0.55
+unknown_class_action: do_not_send_sort_command

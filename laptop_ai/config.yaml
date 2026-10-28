@@ -1,0 +1,58 @@
+project:
+  mode: test
+  actuation_enabled: false
+  log_level: INFO
+  cooldown_seconds: 2.0
+  empty_frames_to_rearm: 5
+  save_predictions: true
+
+camera:
+  source: http://192.168.4.1/capture
+  width: 640
+  height: 480
+  fps: 15
+  display: false
+  poll_interval_seconds: 2.0
+
+model:
+  path: ../models/waste_yolov8s_best.pt
+  device: auto
+  imgsz: 640
+  conf_threshold: 0.55
+  iou_threshold: 0.45
+  max_det: 10
+
+face_filter:
+  enabled: true
+  model_path: ../models/yolov8n-face.pt
+  confidence_threshold: 0.55
+  overlap_threshold: 0.25
+
+mapping:
+  default_unknown: true
+  classes:
+    plastic bottle: BIN_1
+    plastic bag: BIN_1
+    drink carton: BIN_1
+    plastic bottle cap: BIN_1
+    can: BIN_2
+    pop tab: BIN_2
+    cardboard: BIN_3
+    paper: BIN_3
+    battery: UNKNOWN
+    glass bottle: UNKNOWN
+
+serial:
+  enabled: false
+  dry_run: true
+  port: COM3
+  baudrate: 115200
+  timeout: 1.0
+
+training:
+  dataset_yaml: data.yaml
+  epochs: 25
+  batch_size: 16
+  imgsz: 640
+  device: auto
+  save_dir: runs/train

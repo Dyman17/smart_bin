@@ -1,0 +1,1 @@
+"""Trash AI project package."""
